@@ -6,6 +6,8 @@ Bank and card statements, broker contract notes, mutual-fund CAS statements: the
 as password-locked PDFs. inboxkit is the small, tested toolkit that fetches them (read-only), works out
 the password from hints like your name, DOB or PAN, and hands back the text.
 
+How it works, with diagrams (the fetch sequence, the sender check, password order): **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
 | Module | What it does |
 |---|---|
 | `inboxkit.inbox` | `GmailDocuments(query, app=…)`: attachments of emails matching a Gmail query. Read-only scope, paged, says when it truncated, and can skip ids already ingested. |
