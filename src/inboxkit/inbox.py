@@ -187,6 +187,10 @@ class GmailDocuments:
     """
 
     TOKEN_KEY = "gmail_token"
+    #: Gmail rate limits per user per minute and the quota can be shared with other apps on the same
+    #: Google project, so every call retries with exponential backoff on 429 / 403 rateLimitExceeded /
+    #: 5xx (googleapiclient's num_retries) instead of failing a long fetch at the 300th attachment.
+    retries = 6
 
     def __init__(self, query: str, *, app: str, service=None, client_config: ClientConfig = None,
                  config_dir: Optional[str] = None, client_secret_path: Optional[str] = None,
@@ -242,7 +246,7 @@ class GmailDocuments:
         while True:
             page = min(_MAX_PAGE, limit - seen) if limit else _MAX_PAGE
             resp = svc.users().messages().list(
-                userId="me", q=self._query, maxResults=page, pageToken=token).execute()
+                userId="me", q=self._query, maxResults=page, pageToken=token).execute(num_retries=self.retries)
             msgs = resp.get("messages", [])
             for m in msgs:
                 if m["id"] in skip:
@@ -263,7 +267,7 @@ class GmailDocuments:
 
     # -- helpers -----------------------------------------------------------
     def _attachments(self, svc, msg_id: str):
-        full = svc.users().messages().get(userId="me", id=msg_id, format="full").execute()
+        full = svc.users().messages().get(userId="me", id=msg_id, format="full").execute(num_retries=self.retries)
         payload = full.get("payload", {}) or {}
         raw = [(h.get("name", ""), h.get("value", "")) for h in payload.get("headers", []) or []]
         head = {}
@@ -286,7 +290,7 @@ class GmailDocuments:
 
     def _download(self, svc, msg_id: str, attachment_id: str) -> bytes:
         att = svc.users().messages().attachments().get(
-            userId="me", messageId=msg_id, id=attachment_id).execute()
+            userId="me", messageId=msg_id, id=attachment_id).execute(num_retries=self.retries)
         return base64.urlsafe_b64decode(att["data"].encode("utf-8"))
 
     def _client(self) -> Optional[dict]:
