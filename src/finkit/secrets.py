@@ -26,7 +26,11 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Optional
+
+#: service and secret names are interpolated into a `security -i` command line, so keep them plain
+_SAFE = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
 
 @dataclass(frozen=True)
 class StoreResult:
@@ -45,15 +49,19 @@ class SecretStore:
     def __init__(self, service: str, fallback_dir: Optional[str] = None):
         if not service:
             raise ValueError("SecretStore needs a service name: your app's name, e.g. 'myapp'")
+        if not _SAFE.match(service):
+            raise ValueError(f"service name may use letters, digits and . _ @ - only: {service!r}")
         self._service = service
         self._dir = Path(fallback_dir or (Path.home() / f".{service}" / "secrets"))
 
     # -- public API --------------------------------------------------------
     def set(self, name: str, value: str) -> StoreResult:
+        if not _SAFE.match(name or ""):
+            raise ValueError(f"secret name may use letters, digits and . _ @ - only: {name!r}")
         for backend in self._backends():
             try:
                 if backend(name, value, write=True):
-                    return StoreResult(self._backend_name(backend), True)
+                    return StoreResult(self._backend_name(backend), True, getattr(self, "_note", ""))
             except Exception:
                 continue          # try the next backend rather than failing the whole flow
         return self._file_write(name, value)
@@ -110,29 +118,41 @@ class SecretStore:
         return {"_macos": "keychain", "_windows": "dpapi",
                 "_secret_service": "secret-service"}.get(fn.__name__, "unknown")
 
+    #: `security -i` reads one command per line and splits lines past ~4096 characters (measured:
+    #: a 4085-char line round-trips, 4105 does not). Keep a margin under that.
+    _INTERACTIVE_MAX = 4000
+
     def _macos(self, name: str, value: Optional[str], *, write: bool):
-        """macOS keychain via `security`, with the secret passed as HEX.
+        """macOS keychain via `security`, with the secret passed as HEX and kept off argv.
 
-        `-w` reading from stdin TRUNCATES AT 128 CHARACTERS, and does it silently: the command returns
-        0, the item appears in the keychain, and only the first 128 bytes are kept. A Gmail OAuth token
-        is ~500 bytes, so every token ever stored read back as JSON cut off mid-string. That parsed as
-        None, which made the code fall through to "Gmail isn't set up in this build" — a corrupt-token
-        bug wearing a missing-config error message. Measured: 128 of 600 bytes survive via stdin, 600
-        of 600 via -X.
-
-        -X takes the value as hex on argv. argv IS visible to `ps`, unlike stdin, so this trades a
-        little exposure for correctness — a silently truncated credential is the worse failure. Read
-        back with -w, which returns the hex.
+        Two ways this went wrong before, each silent:
+        1. `-w` reading the password from stdin TRUNCATES AT 128 CHARACTERS and still returns 0. A
+           ~500-byte Gmail OAuth token came back cut mid-string and surfaced as "Gmail isn't set up".
+        2. The fix for that put the hex on argv (`-X <hex>`), which any local process can read in `ps`
+           while the command runs.
+        So the whole command goes to `security -i` on STDIN: the value never appears in the process
+        table, and `-X` hex avoids the 128-character password prompt. The write is read back and
+        compared; only a secret too long for one interactive line (over ~2 KB) falls back to argv, and
+        that is reported in the StoreResult rather than done quietly.
 
         -U updates an existing item instead of erroring on a duplicate.
         """
         if write:
-            secret = value or ""
+            self._note = ""
+            hexval = (value or "").encode("utf-8").hex()
+            line = (f'add-generic-password -U -s {self._service} -a {name} '
+                    f'-D "{self._service} token" -X {hexval}\n')
+            if len(line) <= self._INTERACTIVE_MAX:
+                r = subprocess.run(["security", "-i"], input=line, capture_output=True, text=True)
+                if r.returncode == 0 and self._macos(name, None, write=False) == (value or ""):
+                    return True
             r = subprocess.run(
                 ["security", "add-generic-password", "-U", "-s", self._service,
-                 "-a", name, "-D", f"{self._service} token",
-                 "-X", secret.encode("utf-8").hex()],
+                 "-a", name, "-D", f"{self._service} token", "-X", hexval],
                 capture_output=True, text=True)
+            if r.returncode == 0:
+                self._note = ("secret longer than one `security -i` line: written via argv, briefly "
+                              "visible to local processes in `ps`")
             return r.returncode == 0
         r = subprocess.run(["security", "find-generic-password", "-s", self._service,
                             "-a", name, "-w"], capture_output=True, text=True)

@@ -146,3 +146,7 @@ def test_a_borrowed_token_is_found_in_a_fallback_dir_and_never_moved():
         assert src._token == Path(other) / "gmail_token.json" and src._borrowed()
         mine = GmailDocuments("x", app="finkit_test", service=_FakeService([]), config_dir=own)
         assert not mine._borrowed()
+
+
+def test_authorize_is_public_and_the_old_private_name_still_works():
+    assert GmailDocuments.authorize is GmailDocuments._authorize

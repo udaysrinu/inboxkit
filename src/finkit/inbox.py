@@ -115,7 +115,7 @@ class GmailDocuments:
         `skip_ids` are message ids the caller already ingested; they are counted for paging but not
         downloaded again, which makes a daily incremental sync cheap and idempotent.
         """
-        svc = self._service or self._authorize()
+        svc = self._service or self.authorize()
         skip = set(skip_ids)
         out: List[Document] = []
         self.truncated = False
@@ -173,7 +173,11 @@ class GmailDocuments:
         cfg = self._client_config
         return cfg() if callable(cfg) else cfg
 
-    def _authorize(self):
+    def authorize(self):
+        """The authorised Gmail service, for callers that read other mail with the same consent.
+
+        Public so a sibling reader (StatementLens's alert-mail source) needn't call a private method.
+        """
         try:
             from google.oauth2.credentials import Credentials
             from google_auth_oauthlib.flow import InstalledAppFlow
@@ -196,6 +200,8 @@ class GmailDocuments:
                     success_message=f"Connected. You can close this tab and return to {self._app}.")
             self._store().set(self.TOKEN_KEY, creds.to_json())
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+    _authorize = authorize          # the old private name, kept for existing callers
 
     # -- token storage -----------------------------------------------------
     def _store(self) -> SecretStore:
