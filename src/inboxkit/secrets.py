@@ -99,7 +99,7 @@ class SecretStore:
 
     def describe(self) -> StoreResult:
         """Which backend WOULD be used — for showing the user where their token lives."""
-        probe = "__finkit_probe__"
+        probe = "__inboxkit_probe__"
         result = self.set(probe, "x")
         self.delete(probe)
         return result

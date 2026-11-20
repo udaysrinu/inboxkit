@@ -10,9 +10,9 @@ import stat
 import tempfile
 from pathlib import Path
 
-from finkit.secrets import SecretStore, migrate_file_secret
+from inboxkit.secrets import SecretStore, migrate_file_secret
 
-SERVICE = "finkit_pytest"
+SERVICE = "inboxkit_pytest"
 
 
 def _store(tmp) -> SecretStore:

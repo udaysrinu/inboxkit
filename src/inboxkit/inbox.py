@@ -184,7 +184,7 @@ class GmailDocuments:
             from google.auth.transport.requests import Request
             from googleapiclient.discovery import build
         except ImportError as e:  # pragma: no cover
-            raise RuntimeError("Gmail libraries missing: pip install 'finkit[gmail]'") from e
+            raise RuntimeError("Gmail libraries missing: pip install 'inboxkit[gmail]'") from e
         creds = self._load_credentials(Credentials)
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:

@@ -1,13 +1,17 @@
-# finkit
+# inboxkit
 
-Small, tested building blocks for personal-finance tools that read **your own** documents.
+Get your financial documents out of Gmail: search, download, unlock, read.
+
+Bank and card statements, broker contract notes, mutual-fund CAS statements: they all arrive by email
+as password-locked PDFs. inboxkit is the small, tested toolkit that fetches them (read-only), works out
+the password from hints like your name, DOB or PAN, and hands back the text.
 
 | Module | What it does |
 |---|---|
-| `finkit.inbox` | `GmailDocuments(query, app=…)`: attachments of emails matching a Gmail query. Read-only scope, paged, says when it truncated, and can skip ids already ingested. |
-| `finkit.pdf` | `PdfDecryptor().decrypt(bytes, hints)` unlocks a password-protected PDF by trying derived candidates. `PdfTextExtractor().extract(bytes)` reads its text. |
-| `finkit.passwords` | Password candidates from hints (name, DOB, mobile, card, **PAN**, custom), or from the rule a sender states ("last five digits of mobile + DOB in DDMMYY"). |
-| `finkit.secrets` | `SecretStore(service)`: tokens in the OS keychain (macOS `security`, Windows DPAPI, Linux `secret-tool`). Falls back to a 0600 file and **says so**. |
+| `inboxkit.inbox` | `GmailDocuments(query, app=…)`: attachments of emails matching a Gmail query. Read-only scope, paged, says when it truncated, and can skip ids already ingested. |
+| `inboxkit.pdf` | `PdfDecryptor().decrypt(bytes, hints)` unlocks a password-protected PDF by trying derived candidates. `PdfTextExtractor().extract(bytes)` reads its text. |
+| `inboxkit.passwords` | Password candidates from hints (name, DOB, mobile, card, **PAN**, custom), or from the rule a sender states ("last five digits of mobile + DOB in DDMMYY"). |
+| `inboxkit.secrets` | `SecretStore(service)`: tokens in the OS keychain (macOS `security`, Windows DPAPI, Linux `secret-tool`). Falls back to a 0600 file and **says so**. |
 
 Extracted from [StatementLens](https://github.com/udaysrinu/StatementLens), where these pieces read
 bank statements, so that other tools (broker contract notes, mutual-fund CAS statements) reuse the
@@ -18,15 +22,15 @@ same tested code instead of a copy.
 Pin a tag, so an upstream change can't break you until you choose to upgrade:
 
 ```
-pip install "finkit[gmail] @ git+https://github.com/udaysrinu/finkit@v0.1.0"
+pip install "inboxkit[gmail] @ git+https://github.com/udaysrinu/inboxkit@v0.2.0"
 ```
 
 ## Example: unlock this month's documents from one sender
 
 ```python
-from finkit.inbox import GmailDocuments
-from finkit.pdf import PdfDecryptor, PdfTextExtractor
-from finkit.secrets import SecretStore
+from inboxkit.inbox import GmailDocuments
+from inboxkit.pdf import PdfDecryptor, PdfTextExtractor
+from inboxkit.secrets import SecretStore
 
 docs = GmailDocuments('from:example-broker has:attachment filename:pdf newer_than:30d', app="mytool")
 pan = SecretStore("mytool").get("pan")            # read per run, kept in memory, never written out

@@ -7,7 +7,7 @@ oldest 11 were never fetched and the account looked like it began in May 2023 wh
 back to Sep 2022. Backfilling recovered 8 months and 555 transactions.
 """
 
-from finkit.inbox import DEFAULT_LIMIT, _MAX_PAGE, Document, GmailDocuments
+from inboxkit.inbox import DEFAULT_LIMIT, _MAX_PAGE, Document, GmailDocuments
 
 
 class _FakeMessages:
@@ -72,7 +72,7 @@ class _FakeService:
 
 
 def _source(svc):
-    return GmailDocuments("has:attachment", app="finkit_test", service=svc)
+    return GmailDocuments("has:attachment", app="inboxkit_test", service=svc)
 
 
 def test_the_default_limit_covers_a_real_mailbox():
@@ -113,7 +113,7 @@ def test_a_query_is_required():
     # an empty query would read EVERY mail with an attachment; refuse rather than guess
     for q in ("", "   "):
         try:
-            GmailDocuments(q, app="finkit_test", service=_FakeService([]))
+            GmailDocuments(q, app="inboxkit_test", service=_FakeService([]))
         except ValueError:
             continue
         raise AssertionError(f"accepted query {q!r}")
@@ -142,9 +142,9 @@ def test_a_borrowed_token_is_found_in_a_fallback_dir_and_never_moved():
     from pathlib import Path
     with tempfile.TemporaryDirectory() as own, tempfile.TemporaryDirectory() as other:
         (Path(other) / "gmail_token.json").write_text("{}")
-        src = GmailDocuments("x", app="finkit_test", service=_FakeService([]), config_dir=own, fallback_dirs=[other])
+        src = GmailDocuments("x", app="inboxkit_test", service=_FakeService([]), config_dir=own, fallback_dirs=[other])
         assert src._token == Path(other) / "gmail_token.json" and src._borrowed()
-        mine = GmailDocuments("x", app="finkit_test", service=_FakeService([]), config_dir=own)
+        mine = GmailDocuments("x", app="inboxkit_test", service=_FakeService([]), config_dir=own)
         assert not mine._borrowed()
 
 

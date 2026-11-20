@@ -3,7 +3,7 @@
 Extracted from StatementLens (adapters/crypto/pdf_decryptor.py).
 
 Heavy deps (pikepdf, pdfplumber) are imported lazily so the package imports without them; the
-they are core dependencies of finkit. Password candidates come from finkit.passwords.
+they are core dependencies of inboxkit. Password candidates come from inboxkit.passwords.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ class PdfDecryptor:
         try:
             import pikepdf
         except ImportError as e:  # pragma: no cover
-            raise PdfDecryptError("pikepdf not installed (pip install finkit)") from e
+            raise PdfDecryptError("pikepdf not installed (pip install inboxkit)") from e
 
         # not encrypted? return unchanged
         try:
@@ -55,7 +55,7 @@ class PdfTextExtractor:
         try:
             import pdfplumber
         except ImportError as e:  # pragma: no cover
-            raise RuntimeError("pdfplumber not installed (pip install finkit)") from e
+            raise RuntimeError("pdfplumber not installed (pip install inboxkit)") from e
         parts: List[str] = []
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             for page in pdf.pages:

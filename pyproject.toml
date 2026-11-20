@@ -3,13 +3,13 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finkit"
-version = "0.1.0"
-description = "Small, tested building blocks for personal-finance tools: Gmail documents, PDF unlock, keychain secrets."
+name = "inboxkit"
+version = "0.2.0"
+description = "Get your financial documents out of Gmail: search, download, unlock password-protected PDFs, read them."
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{name = "finkit contributors"}]
+authors = [{name = "inboxkit contributors"}]
 dependencies = ["pikepdf>=8.0.0", "pdfplumber>=0.10.0"]
 
 [project.optional-dependencies]

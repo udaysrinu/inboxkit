@@ -1,5 +1,5 @@
 """Password derivation. Synthetic hints only: no real secrets, ever."""
-from finkit import passwords as pr
+from inboxkit import passwords as pr
 
 FAKE_PAN = "ABCDE1234F"          # the documented example format, not anyone's PAN
 

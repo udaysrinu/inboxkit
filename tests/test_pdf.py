@@ -6,7 +6,7 @@ import io
 
 import pikepdf
 
-from finkit.pdf import PdfDecryptError, PdfDecryptor, PdfTextExtractor
+from inboxkit.pdf import PdfDecryptError, PdfDecryptor, PdfTextExtractor
 
 FAKE_PAN = "ABCDE1234F"
 TEXT = "Contract Note Trade 1001 BUY 10 TCS 3000.00"
