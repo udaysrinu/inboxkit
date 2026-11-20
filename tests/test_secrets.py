@@ -12,7 +12,7 @@ from pathlib import Path
 
 from inboxkit.secrets import SecretStore, migrate_file_secret
 
-SERVICE = "inboxkit_pytest"
+SERVICE = f"inboxkit_pytest_{os.getpid()}"   # per run: two suites at once must not share a keychain item
 
 
 def _store(tmp) -> SecretStore:
