@@ -47,17 +47,29 @@ class Document:
     #: really came from someone, use authenticated(), not these headers directly.
     headers: list = field(default_factory=list)
 
+    #: Gmail's labelIds for the message, e.g. ["INBOX", "CATEGORY_UPDATES"]
+    labels: list = field(default_factory=list)
+
     def authenticated(self, domain: str, authserv: str = "mx.google.com") -> Optional[str]:
         """None if this mail provably comes from `domain`, else the reason it does not. Fails closed.
 
-        Anyone can put any From line and any Authentication-Results header in a mail they send. What
-        they cannot forge is the receiving server's verdict, which that server PREPENDS, so only the
-        topmost Authentication-Results counts, and only if its authserv-id is `authserv` (Gmail's
-        mx.google.com). It must show a passing DKIM signature for `domain` and DMARC passing with
-        header.from = `domain`. The single From address must also be at `domain`. A mail with more than
-        one From, Date or Subject is ambiguous (RFC 5322 allows one) and refused.
+        Anyone can write any From line and any Authentication-Results header. What they cannot forge is
+        the receiving server's verdict, which that server PREPENDS: so only the topmost
+        Authentication-Results counts, and only if its authserv-id is `authserv` (Gmail: mx.google.com).
+        It is PARSED (RFC 8601), not searched: comments and quoted strings are removed first, because
+        Gmail copies sender-controlled text into it (the SPF comment, a quoted envelope address that can
+        contain ";dkim=pass header.i=@..."), and only the entry whose method is exactly `dkim` /
+        `dmarc` is read. Requires: a passing DKIM signature whose domain IS `domain`; exactly one DMARC
+        entry, passing, with header.from = `domain`; a single From address at `domain`; one Date and
+        one Subject (RFC 5322 allows one).
+
+        Limit: this trusts that the mail ARRIVED by SMTP, so Gmail wrote the topmost verdict. Mail you
+        sent (SENT, DRAFT) is refused; mail injected straight into the mailbox by someone who already
+        controls it is out of scope.
         """
         dom = domain.lower()
+        if {"SENT", "DRAFT"} & {str(x).upper() for x in self.labels}:
+            return "not received mail (SENT/DRAFT)"
         for name in ("from", "date", "subject"):
             n = sum(1 for k, _ in self.headers if k.lower() == name)
             if n > 1:
@@ -65,21 +77,22 @@ class Document:
         froms = [v for k, v in self.headers if k.lower() == "from"]
         if not froms:
             return "no From header"
-        addr = parseaddr(froms[0])[1].lower()
-        if addr.rsplit("@", 1)[-1] != dom:
+        if parseaddr(froms[0])[1].lower().rsplit("@", 1)[-1] != dom:
             return f"From address is not at {domain}"
         auth = [v for k, v in self.headers if k.lower() == "authentication-results"]
         if not auth:
             return "no Authentication-Results"
-        top = auth[0].strip().lower()
-        server = top.split(";", 1)[0].strip()
+        server, entries = _auth_results(auth[0])
         if server != authserv.lower():
             return f"topmost Authentication-Results is from {server!r}, not {authserv}"
-        signed = re.findall(r"dkim=pass[^;]*?header\.(?:i=@|d=)([a-z0-9.-]+)", top)
-        if dom not in signed:
+        dkim_ok = any(m == "dkim" and r == "pass" and
+                      (p.get("header.d") == dom or p.get("header.i", "").rsplit("@", 1)[-1] == dom)
+                      for m, r, p in entries)
+        if not dkim_ok:
             return f"no passing DKIM signature for {domain}"
-        if not re.search(r"dmarc=pass\b[^;]*header\.from=" + re.escape(dom) + r"(?![a-z0-9.-])", top):
-            return f"DMARC did not pass for {domain}"
+        dmarc = [(r, p) for m, r, p in entries if m == "dmarc"]
+        if len(dmarc) != 1 or dmarc[0][0] != "pass" or dmarc[0][1].get("header.from") != dom:
+            return f"DMARC did not pass (exactly once) for {domain}"
         return None
 
     # StatementLens's old _RawStatement names, so existing callers keep working
@@ -90,6 +103,45 @@ class Document:
     @property
     def source_name(self) -> str:
         return self.filename
+
+
+def _auth_results(value: str):
+    """RFC 8601 Authentication-Results -> (authserv_id, [(method, result, {ptype.property: value})]).
+
+    Comments (nested parentheses) and quoted strings are DROPPED before anything is read, so text the
+    sender controls can never be mistaken for a result or a property.
+    """
+    out, depth, quoted, esc = [], 0, False, False
+    for ch in value:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and (quoted or depth):
+            esc = True
+            continue
+        if quoted:
+            quoted = ch != '"'
+            continue
+        if depth:
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            continue
+        if ch == '"':
+            quoted = True
+        elif ch == "(":
+            depth = 1
+        else:
+            out.append(ch)
+    parts = [x.strip() for x in "".join(out).lower().split(";")]
+    server = parts[0].split()[0] if parts and parts[0].split() else ""
+    entries = []
+    for part in parts[1:]:
+        toks = part.split()
+        if not toks or "=" not in toks[0]:
+            continue
+        method, result = toks[0].split("=", 1)
+        props = dict(t.split("=", 1) for t in toks[1:] if "=" in t)
+        entries.append((method, result, props))
+    return server, entries
 
 
 ClientConfig = Union[dict, Callable[[], Optional[dict]], None]
@@ -173,7 +225,7 @@ class GmailDocuments:
                 for att in atts:
                     data = self._download(svc, m["id"], att["attachment_id"])
                     out.append(Document(m["id"], att["filename"], data, head.get("subject", ""),
-                                        head.get("from", ""), head.get("date", ""), head["_raw"]))
+                                        head.get("from", ""), head.get("date", ""), head["_raw"], head["_labels"]))
             seen += len(msgs)
             token = resp.get("nextPageToken")
             if not token:
@@ -203,6 +255,7 @@ class GmailDocuments:
 
         walk(payload)
         head["_raw"] = raw
+        head["_labels"] = full.get("labelIds", []) or []
         return head, found
 
     def _download(self, svc, msg_id: str, attachment_id: str) -> bytes:

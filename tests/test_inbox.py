@@ -184,6 +184,18 @@ def test_spoofing_attempts_are_refused():
         "DMARC failed": swap("Authentication-Results", GOOD[0][1].replace("dmarc=pass", "dmarc=fail")),
         "lookalike domain": swap("Authentication-Results", GOOD[0][1].replace("header.from=mail.example.com", "header.from=mail.example.com.evil.example")),
         "two From headers": GOOD + [("From", "x <notes@mail.example.com>")],
+        # parser differentials: sender-controlled text that a substring search would misread
+        "quoted envelope address smuggling a dkim result": swap("Authentication-Results",
+            'mx.google.com; dkim=pass header.i=@evil.example; spf=pass smtp.mailfrom="x;dkim=pass header.i=@mail.example.com"@evil.example; '
+            'dmarc=pass header.from=mail.example.com'),
+        "a comment claiming the pass": swap("Authentication-Results",
+            'mx.google.com; dkim=fail (dkim=pass header.i=@mail.example.com) header.i=@mail.example.com; dmarc=pass header.from=mail.example.com'),
+        "a second, failing dmarc entry": swap("Authentication-Results", GOOD[0][1] + "; dmarc=fail header.from=mail.example.com"),
     }
     for why, headers in cases.items():
         assert _doc(headers).authenticated("mail.example.com"), f"accepted: {why}"
+
+
+def test_mail_you_sent_is_not_received_mail():
+    d = Document("m", "n.pdf", b"", headers=GOOD, labels=["SENT"])
+    assert d.authenticated("mail.example.com")
