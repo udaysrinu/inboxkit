@@ -34,7 +34,9 @@ class _FakeMessages:
             return _Exec({"data": base64.urlsafe_b64encode(b"%PDF-1.7 " + messageId.encode()).decode()})
         if id in self.with_pdf:
             return _Exec({"payload": {
-                "headers": [{"name": "Subject", "value": f"Contract Note {id}"},
+                "headers": [{"name": "Authentication-Results", "value": "mx.google.com; dkim=pass"},
+                            {"name": "Subject", "value": f"Contract Note {id}"},
+                            {"name": "Authentication-Results", "value": "attacker.example; dkim=pass"},
                             {"name": "From", "value": "Broker <no-reply@example.com>"},
                             {"name": "Date", "value": "Fri, 16 Oct 2026 18:04:39 +0000"}],
                 "parts": [{"filename": "note.pdf", "body": {"attachmentId": "a-" + id}},
@@ -150,3 +152,10 @@ def test_a_borrowed_token_is_found_in_a_fallback_dir_and_never_moved():
 
 def test_authorize_is_public_and_the_old_private_name_still_works():
     assert GmailDocuments.authorize is GmailDocuments._authorize
+
+
+def test_headers_keep_order_and_duplicates_so_the_first_auth_result_can_be_trusted():
+    svc = _FakeService(["m1"]); svc.msgs.with_pdf = {"m1"}
+    d = _source(svc).fetch(limit=5)[0]
+    auth = [v for n, v in d.headers if n == "Authentication-Results"]
+    assert auth == ["mx.google.com; dkim=pass", "attacker.example; dkim=pass"], auth

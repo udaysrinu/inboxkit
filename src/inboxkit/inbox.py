@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import base64
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Sequence, Union
 
@@ -41,6 +41,10 @@ class Document:
     subject: str = ""
     sender: str = ""
     date: str = ""            # the email's Date header, as sent
+    #: every header as (name, value), IN ORDER and with duplicates kept. A caller that must trust the
+    #: sender reads the FIRST Authentication-Results (the one the receiving server, e.g. mx.google.com,
+    #: prepended); later ones can be written by anyone, including the sender.
+    headers: list = field(default_factory=list)
 
     # StatementLens's old _RawStatement names, so existing callers keep working
     @property
@@ -132,8 +136,8 @@ class GmailDocuments:
                 head, atts = self._attachments(svc, m["id"])
                 for att in atts:
                     data = self._download(svc, m["id"], att["attachment_id"])
-                    out.append(Document(m["id"], att["filename"], data,
-                                        head.get("subject", ""), head.get("from", ""), head.get("date", "")))
+                    out.append(Document(m["id"], att["filename"], data, head.get("subject", ""),
+                                        head.get("from", ""), head.get("date", ""), head["_raw"]))
             seen += len(msgs)
             token = resp.get("nextPageToken")
             if not token:
@@ -147,7 +151,10 @@ class GmailDocuments:
     def _attachments(self, svc, msg_id: str):
         full = svc.users().messages().get(userId="me", id=msg_id, format="full").execute()
         payload = full.get("payload", {}) or {}
-        head = {h.get("name", "").lower(): h.get("value", "") for h in payload.get("headers", []) or []}
+        raw = [(h.get("name", ""), h.get("value", "")) for h in payload.get("headers", []) or []]
+        head = {}
+        for n, v in raw:
+            head.setdefault(n.lower(), v)          # the first occurrence, for subject/from/date
         found: List[dict] = []
 
         def walk(part):
@@ -159,6 +166,7 @@ class GmailDocuments:
                 walk(c)
 
         walk(payload)
+        head["_raw"] = raw
         return head, found
 
     def _download(self, svc, msg_id: str, attachment_id: str) -> bytes:
