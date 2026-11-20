@@ -132,8 +132,8 @@ class SecretStore:
            while the command runs.
         So the whole command goes to `security -i` on STDIN: the value never appears in the process
         table, and `-X` hex avoids the 128-character password prompt. The write is read back and
-        compared; only a secret too long for one interactive line (over ~2 KB) falls back to argv, and
-        that is reported in the StoreResult rather than done quietly.
+        compared. A failed interactive write is a failure (set() then falls back honestly); argv is used
+        ONLY for a secret too long for one interactive line (over ~2 KB), and the StoreResult says so.
 
         -U updates an existing item instead of erroring on a duplicate.
         """
@@ -143,16 +143,18 @@ class SecretStore:
             line = (f'add-generic-password -U -s {self._service} -a {name} '
                     f'-D "{self._service} token" -X {hexval}\n')
             if len(line) <= self._INTERACTIVE_MAX:
+                # the normal path. If it fails, do NOT retry on argv: report failure so set() falls
+                # through to the next backend (the honest 0600-file fallback), never to `ps`.
                 r = subprocess.run(["security", "-i"], input=line, capture_output=True, text=True)
-                if r.returncode == 0 and self._macos(name, None, write=False) == (value or ""):
-                    return True
+                return r.returncode == 0 and self._macos(name, None, write=False) == (value or "")
+            # Only a secret too long for one interactive line takes argv, and the result says so.
             r = subprocess.run(
                 ["security", "add-generic-password", "-U", "-s", self._service,
                  "-a", name, "-D", f"{self._service} token", "-X", hexval],
                 capture_output=True, text=True)
             if r.returncode == 0:
-                self._note = ("secret longer than one `security -i` line: written via argv, briefly "
-                              "visible to local processes in `ps`")
+                self._note = (f"secret is {len(value or '')} bytes, longer than one `security -i` line "
+                              "allows: written via argv, briefly visible to local processes in `ps`")
             return r.returncode == 0
         r = subprocess.run(["security", "find-generic-password", "-s", self._service,
                             "-a", name, "-w"], capture_output=True, text=True)

@@ -192,3 +192,29 @@ def test_a_long_secret_survives_the_keychain_intact():
             assert got == long_secret, f"kept {len(got or '')} of {len(long_secret)} bytes"
         finally:
             store.delete("tok")
+
+
+def test_a_failed_interactive_write_never_retries_on_argv():
+    """If `security -i` fails, the secret must not then be put on a command line."""
+    import platform
+    if platform.system() != "Darwin":
+        return
+    import subprocess
+    real_run = subprocess.run
+    argvs = []
+
+    def failing(cmd, *a, **kw):
+        if isinstance(cmd, list):
+            argvs.append(" ".join(cmd))
+            if cmd[:2] == ["security", "-i"]:
+                return subprocess.CompletedProcess(cmd, 1, "", "simulated failure")
+        return real_run(cmd, *a, **kw)
+
+    subprocess.run = failing
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            r = SecretStore(service=SERVICE + "_fail", fallback_dir=str(Path(tmp))).set("k", "S3CRET-v")
+    finally:
+        subprocess.run = real_run
+    assert "S3CRET-v".encode().hex() not in " ".join(argvs), "fell back to argv after a failed -i write"
+    assert r.backend == "file" and not r.secure, "should have fallen back to the honest file store"
