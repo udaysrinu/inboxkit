@@ -23,7 +23,7 @@ same tested code instead of a copy.
 Pin a tag, so an upstream change can't break you until you choose to upgrade:
 
 ```
-pip install "inboxkit[gmail] @ git+https://github.com/udaysrinu/inboxkit@v0.3.4"
+pip install "inboxkit[gmail] @ git+https://github.com/udaysrinu/inboxkit@v0.3.5"
 ```
 
 ## Example: unlock this month's documents from one sender

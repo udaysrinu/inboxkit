@@ -92,6 +92,8 @@ class Document:
         if not auth:
             return "no Authentication-Results"
         server, entries = _auth_results(auth[0])
+        if entries is None:
+            return "malformed Authentication-Results"
         if server != authserv.lower():
             return f"topmost Authentication-Results is from {server!r}, not {authserv}"
         dmarc = [(r, p) for m, r, p in entries if m == "dmarc"]
@@ -119,7 +121,9 @@ def _auth_results(value: str):
     """RFC 8601 Authentication-Results -> (authserv_id, [(method, result, {ptype.property: value})]).
 
     Comments (nested parentheses) and quoted strings are DROPPED before anything is read, so text the
-    sender controls can never be mistaken for a result or a property.
+    sender controls can never be mistaken for a result or a property. MALFORMED structure fails closed
+    (returns no entries): an unclosed comment or quote, a stray ')' or a dangling escape would otherwise
+    let one part of the header swallow, or hide, another.
     """
     out, depth, quoted, esc = [], 0, False, False
     for ch in value:
@@ -139,8 +143,12 @@ def _auth_results(value: str):
             quoted = True
         elif ch == "(":
             depth = 1
+        elif ch == ")":
+            return "", None                        # a ')' with no comment open
         else:
             out.append(ch)
+    if depth or quoted or esc:
+        return "", None                            # unterminated comment, quote or escape
     parts = [x.strip() for x in "".join(out).lower().split(";")]
     server = parts[0].split()[0] if parts and parts[0].split() else ""
     entries = []

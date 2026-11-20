@@ -211,6 +211,10 @@ def test_spoofing_attempts_are_refused():
         "a comment claiming the pass": _with(auth=
             'mx.google.com; dmarc=fail (dmarc=pass header.from=mail.example.com) header.from=mail.example.com'),
         "a second, failing dmarc entry": _with(auth=a + "; dmarc=fail header.from=mail.example.com"),
+        # malformed structure fails closed
+        "an unclosed comment": _with(auth="mx.google.com; spf=pass (unclosed; dmarc=pass header.from=mail.example.com"),
+        "an unclosed quote": _with(auth='mx.google.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=mail.example.com'),
+        "a stray close paren": _with(auth="mx.google.com; dmarc=fail) dmarc=pass header.from=mail.example.com"),
     }
     for why, headers in cases.items():
         assert _doc(headers).authenticated("mail.example.com"), f"accepted: {why}"

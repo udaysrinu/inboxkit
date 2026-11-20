@@ -6,4 +6,4 @@
 - inboxkit.positions  parse_position: loan statements, FD advices, NPS statements → self-checked snapshots
 - inboxkit.secrets    SecretStore: tokens in the OS keychain, with an honest 0600-file fallback
 """
-__version__ = "0.3.4"
+__version__ = "0.3.5"
