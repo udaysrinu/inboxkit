@@ -50,10 +50,12 @@ class Document:
     #: Gmail's labelIds for the message, e.g. ["INBOX", "CATEGORY_UPDATES"]
     labels: list = field(default_factory=list)
 
-    def authenticated(self, domain: str, authserv: str = "mx.google.com") -> Optional[str]:
+    def authenticated(self, domain: str, authserv: str = "mx.google.com", allow_spf_only: bool = False) -> Optional[str]:
         """None if this mail provably comes from `domain` (or a subdomain of it), else why not. Fails closed.
 
-        `domain` may be an organisational domain ("sbi.co.in" covers alerts.sbi.co.in) or one exact host.
+        `domain` is the domain you trust, normally the organisational one ("sbi.co.in" covers
+        alerts.sbi.co.in). Everything the verdict names must sit inside it, so a reported header.from can
+        never be a public suffix or a parent you did not choose.
 
         Anyone can write any From line and any Authentication-Results header. What they cannot forge is
         the receiving server's verdict, which that server PREPENDS: so only the topmost
@@ -63,10 +65,11 @@ class Document:
         is read.
 
         The test is DMARC, as DMARC defines it. Exactly one dmarc entry, result pass, and its
-        header.from ALIGNED (relaxed) with the From domain: equal, or the From domain a subdomain of it.
-        Gmail reports the organisational domain there (header.from=sbi.co.in for alerts.sbi.co.in). A
-        DMARC pass already means an aligned DKIM signature OR aligned SPF, so DKIM is not separately
-        required: some genuine senders (an ESP that signs with its own domain) pass on SPF alone. The
+        header.from ALIGNED (relaxed) with the From domain, and inside `domain`. Gmail reports the
+        organisational domain there (header.from=sbi.co.in for alerts.sbi.co.in). By default a passing DKIM
+        signature inside `domain` is ALSO required. DMARC can pass on aligned SPF alone, which a shared
+        sending service makes weaker, so SPF-only acceptance is an explicit per-sender opt-in
+        (allow_spf_only=True), for a sender known to sign only through its ESP's domain. The
         single From address must be at `domain` or a subdomain, matched on a dot boundary
         (evilsbi.co.in and sbi.co.in.evil.com are not sbi.co.in). One From, Date and Subject (RFC 5322).
 
@@ -103,8 +106,13 @@ class Document:
         hfrom = props.get("header.from", "")
         if result != "pass":
             return f"DMARC {result} for {host}"
-        if not hfrom or not within(host, hfrom):
-            return f"DMARC passed for {hfrom!r}, which is not aligned with the From domain {host}"
+        if not hfrom or not within(host, hfrom) or not within(hfrom, dom):
+            return f"DMARC passed for {hfrom!r}, which is not aligned with {host} inside {domain}"
+        if not allow_spf_only:
+            signer = lambda p: p.get("header.d") or p.get("header.i", "").rsplit("@", 1)[-1]
+            if not any(m == "dkim" and r == "pass" and within(signer(p), dom) for m, r, p in entries):
+                return (f"no passing DKIM signature inside {domain} (a sender that signs only through its ESP "
+                        f"needs allow_spf_only=True)")
         return None
 
     # StatementLens's old _RawStatement names, so existing callers keep working

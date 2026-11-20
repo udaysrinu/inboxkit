@@ -184,12 +184,16 @@ def test_genuine_patterns_that_a_stricter_check_wrongly_refused():
     # Gmail reports DMARC's header.from as the ORGANISATIONAL domain (a big bank's alerts host)
     org = _with(auth="mx.google.com; dkim=pass header.i=@alerts.example.com; spf=pass; dmarc=pass (p=REJECT) header.from=example.com",
                 frm="Bank <alerts@alerts.example.com>")
-    assert _doc(org).authenticated("example.com") is None and _doc(org).authenticated("alerts.example.com") is None
+    assert _doc(org).authenticated("example.com") is None
+    # ... but trusting only one HOST does not extend to a parent the caller did not choose
+    assert _doc(org).authenticated("alerts.example.com")
     # the sender's own DKIM fails, its ESP signs with its own domain, and DMARC passes on aligned SPF
     spf = _with(auth="mx.google.com; dkim=fail header.i=@mailer.example.com; dkim=pass header.i=@esp.example; "
                      "spf=pass smtp.mailfrom=b@mailer1.example.com; dmarc=pass (p=NONE) header.from=mailer.example.com",
                 frm="Fund <stmt@mailer.example.com>")
-    assert _doc(spf).authenticated("example.com") is None
+    assert _doc(spf).authenticated("example.com", allow_spf_only=True) is None
+    # SPF-only is an explicit opt-in: by default a passing DKIM signature inside the domain is required
+    assert _doc(spf).authenticated("example.com")
 
 
 def test_spoofing_attempts_are_refused():
@@ -211,6 +215,8 @@ def test_spoofing_attempts_are_refused():
         "a comment claiming the pass": _with(auth=
             'mx.google.com; dmarc=fail (dmarc=pass header.from=mail.example.com) header.from=mail.example.com'),
         "a second, failing dmarc entry": _with(auth=a + "; dmarc=fail header.from=mail.example.com"),
+        "header.from a public suffix": _with(auth="mx.google.com; dkim=pass header.i=@mail.example.com; dmarc=pass header.from=com"),
+        "DKIM only from an outside signer": _with(auth="mx.google.com; dkim=pass header.i=@esp.example; spf=pass; dmarc=pass header.from=mail.example.com"),
         # malformed structure fails closed
         "an unclosed comment": _with(auth="mx.google.com; spf=pass (unclosed; dmarc=pass header.from=mail.example.com"),
         "an unclosed quote": _with(auth='mx.google.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=mail.example.com'),
