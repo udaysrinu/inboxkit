@@ -51,23 +51,31 @@ class Document:
     labels: list = field(default_factory=list)
 
     def authenticated(self, domain: str, authserv: str = "mx.google.com") -> Optional[str]:
-        """None if this mail provably comes from `domain`, else the reason it does not. Fails closed.
+        """None if this mail provably comes from `domain` (or a subdomain of it), else why not. Fails closed.
+
+        `domain` may be an organisational domain ("sbi.co.in" covers alerts.sbi.co.in) or one exact host.
 
         Anyone can write any From line and any Authentication-Results header. What they cannot forge is
         the receiving server's verdict, which that server PREPENDS: so only the topmost
         Authentication-Results counts, and only if its authserv-id is `authserv` (Gmail: mx.google.com).
         It is PARSED (RFC 8601), not searched: comments and quoted strings are removed first, because
-        Gmail copies sender-controlled text into it (the SPF comment, a quoted envelope address that can
-        contain ";dkim=pass header.i=@..."), and only the entry whose method is exactly `dkim` /
-        `dmarc` is read. Requires: a passing DKIM signature whose domain IS `domain`; exactly one DMARC
-        entry, passing, with header.from = `domain`; a single From address at `domain`; one Date and
-        one Subject (RFC 5322 allows one).
+        Gmail copies sender-controlled text into it, and only the entry whose method is exactly `dmarc`
+        is read.
+
+        The test is DMARC, as DMARC defines it. Exactly one dmarc entry, result pass, and its
+        header.from ALIGNED (relaxed) with the From domain: equal, or the From domain a subdomain of it.
+        Gmail reports the organisational domain there (header.from=sbi.co.in for alerts.sbi.co.in). A
+        DMARC pass already means an aligned DKIM signature OR aligned SPF, so DKIM is not separately
+        required: some genuine senders (an ESP that signs with its own domain) pass on SPF alone. The
+        single From address must be at `domain` or a subdomain, matched on a dot boundary
+        (evilsbi.co.in and sbi.co.in.evil.com are not sbi.co.in). One From, Date and Subject (RFC 5322).
 
         Limit: this trusts that the mail ARRIVED by SMTP, so Gmail wrote the topmost verdict. Mail you
         sent (SENT, DRAFT) is refused; mail injected straight into the mailbox by someone who already
         controls it is out of scope.
         """
-        dom = domain.lower()
+        dom = domain.lower().strip(".")
+        within = lambda host, base: host == base or host.endswith("." + base)
         if {"SENT", "DRAFT"} & {str(x).upper() for x in self.labels}:
             return "not received mail (SENT/DRAFT)"
         for name in ("from", "date", "subject"):
@@ -77,7 +85,8 @@ class Document:
         froms = [v for k, v in self.headers if k.lower() == "from"]
         if not froms:
             return "no From header"
-        if parseaddr(froms[0])[1].lower().rsplit("@", 1)[-1] != dom:
+        host = parseaddr(froms[0])[1].lower().rsplit("@", 1)[-1]
+        if not within(host, dom):
             return f"From address is not at {domain}"
         auth = [v for k, v in self.headers if k.lower() == "authentication-results"]
         if not auth:
@@ -85,14 +94,15 @@ class Document:
         server, entries = _auth_results(auth[0])
         if server != authserv.lower():
             return f"topmost Authentication-Results is from {server!r}, not {authserv}"
-        dkim_ok = any(m == "dkim" and r == "pass" and
-                      (p.get("header.d") == dom or p.get("header.i", "").rsplit("@", 1)[-1] == dom)
-                      for m, r, p in entries)
-        if not dkim_ok:
-            return f"no passing DKIM signature for {domain}"
         dmarc = [(r, p) for m, r, p in entries if m == "dmarc"]
-        if len(dmarc) != 1 or dmarc[0][0] != "pass" or dmarc[0][1].get("header.from") != dom:
-            return f"DMARC did not pass (exactly once) for {domain}"
+        if len(dmarc) != 1:
+            return f"expected one DMARC result, found {len(dmarc)}"
+        result, props = dmarc[0]
+        hfrom = props.get("header.from", "")
+        if result != "pass":
+            return f"DMARC {result} for {host}"
+        if not hfrom or not within(host, hfrom):
+            return f"DMARC passed for {hfrom!r}, which is not aligned with the From domain {host}"
         return None
 
     # StatementLens's old _RawStatement names, so existing callers keep working

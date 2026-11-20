@@ -166,36 +166,55 @@ GOOD = [("Authentication-Results", "mx.google.com; dkim=pass header.i=@mail.exam
         ("From", "Example <notes@mail.example.com>"), ("Date", "Fri, 16 Oct 2026 18:04:39 +0000"), ("Subject", "Note")]
 
 
-def _doc(headers):
-    return Document("m", "n.pdf", b"", headers=headers)
+def _doc(headers, labels=()):
+    return Document("m", "n.pdf", b"", headers=headers, labels=list(labels))
+
+
+def _with(auth=None, frm=None, extra=()):
+    h = [(n, (auth if n == "Authentication-Results" and auth is not None else frm if n == "From" and frm is not None else v))
+         for n, v in GOOD]
+    return list(extra) + h
 
 
 def test_a_genuinely_signed_mail_is_authenticated():
     assert _doc(GOOD).authenticated("mail.example.com") is None
 
 
+def test_genuine_patterns_that_a_stricter_check_wrongly_refused():
+    # Gmail reports DMARC's header.from as the ORGANISATIONAL domain (a big bank's alerts host)
+    org = _with(auth="mx.google.com; dkim=pass header.i=@alerts.example.com; spf=pass; dmarc=pass (p=REJECT) header.from=example.com",
+                frm="Bank <alerts@alerts.example.com>")
+    assert _doc(org).authenticated("example.com") is None and _doc(org).authenticated("alerts.example.com") is None
+    # the sender's own DKIM fails, its ESP signs with its own domain, and DMARC passes on aligned SPF
+    spf = _with(auth="mx.google.com; dkim=fail header.i=@mailer.example.com; dkim=pass header.i=@esp.example; "
+                     "spf=pass smtp.mailfrom=b@mailer1.example.com; dmarc=pass (p=NONE) header.from=mailer.example.com",
+                frm="Fund <stmt@mailer.example.com>")
+    assert _doc(spf).authenticated("example.com") is None
+
+
 def test_spoofing_attempts_are_refused():
-    swap = lambda name, value: [(n, value if n == name else v) for n, v in GOOD]
+    a = GOOD[0][1]
     cases = {
-        "From at another domain": swap("From", "Example <notes@evil.example>"),
-        "a forged verdict on top": [("Authentication-Results", "evil.example; dkim=pass header.i=@mail.example.com; dmarc=pass header.from=mail.example.com")] + GOOD,
+        "From at another domain": _with(frm="Example <notes@evil.example>"),
+        "suffix trick": _with(frm="Example <notes@mail.example.com.evil.example>"),
+        "no dot boundary": _with(frm="Example <notes@evilmail.example.com>"),
+        "a forged verdict on top": _with(extra=[("Authentication-Results", "evil.example; dmarc=pass header.from=mail.example.com")]),
         "no verdict at all": [h for h in GOOD if h[0] != "Authentication-Results"],
-        "DKIM signed by someone else": swap("Authentication-Results", GOOD[0][1].replace("header.i=@mail.example.com", "header.i=@evil.example")),
-        "DMARC failed": swap("Authentication-Results", GOOD[0][1].replace("dmarc=pass", "dmarc=fail")),
-        "lookalike domain": swap("Authentication-Results", GOOD[0][1].replace("header.from=mail.example.com", "header.from=mail.example.com.evil.example")),
+        "DMARC failed": _with(auth=a.replace("dmarc=pass", "dmarc=fail")),
+        "DMARC passed for someone else": _with(auth=a.replace("header.from=mail.example.com", "header.from=evil.example")),
+        "lookalike header.from": _with(auth=a.replace("header.from=mail.example.com", "header.from=mail.example.com.evil.example")),
         "two From headers": GOOD + [("From", "x <notes@mail.example.com>")],
         # parser differentials: sender-controlled text that a substring search would misread
-        "quoted envelope address smuggling a dkim result": swap("Authentication-Results",
-            'mx.google.com; dkim=pass header.i=@evil.example; spf=pass smtp.mailfrom="x;dkim=pass header.i=@mail.example.com"@evil.example; '
-            'dmarc=pass header.from=mail.example.com'),
-        "a comment claiming the pass": swap("Authentication-Results",
-            'mx.google.com; dkim=fail (dkim=pass header.i=@mail.example.com) header.i=@mail.example.com; dmarc=pass header.from=mail.example.com'),
-        "a second, failing dmarc entry": swap("Authentication-Results", GOOD[0][1] + "; dmarc=fail header.from=mail.example.com"),
+        "quoted envelope address smuggling a dmarc pass": _with(auth=
+            'mx.google.com; spf=pass smtp.mailfrom="x;dmarc=pass header.from=mail.example.com"@evil.example; '
+            'dmarc=fail header.from=mail.example.com'),
+        "a comment claiming the pass": _with(auth=
+            'mx.google.com; dmarc=fail (dmarc=pass header.from=mail.example.com) header.from=mail.example.com'),
+        "a second, failing dmarc entry": _with(auth=a + "; dmarc=fail header.from=mail.example.com"),
     }
     for why, headers in cases.items():
         assert _doc(headers).authenticated("mail.example.com"), f"accepted: {why}"
 
 
 def test_mail_you_sent_is_not_received_mail():
-    d = Document("m", "n.pdf", b"", headers=GOOD, labels=["SENT"])
-    assert d.authenticated("mail.example.com")
+    assert _doc(GOOD, labels=["SENT"]).authenticated("mail.example.com")
