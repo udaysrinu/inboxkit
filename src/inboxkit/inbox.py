@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import base64
 import os
+import re
+from email.utils import parseaddr
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Sequence, Union
@@ -41,10 +43,44 @@ class Document:
     subject: str = ""
     sender: str = ""
     date: str = ""            # the email's Date header, as sent
-    #: every header as (name, value), IN ORDER and with duplicates kept. A caller that must trust the
-    #: sender reads the FIRST Authentication-Results (the one the receiving server, e.g. mx.google.com,
-    #: prepended); later ones can be written by anyone, including the sender.
+    #: every header as (name, value), IN ORDER and with duplicates kept. To decide whether the mail
+    #: really came from someone, use authenticated(), not these headers directly.
     headers: list = field(default_factory=list)
+
+    def authenticated(self, domain: str, authserv: str = "mx.google.com") -> Optional[str]:
+        """None if this mail provably comes from `domain`, else the reason it does not. Fails closed.
+
+        Anyone can put any From line and any Authentication-Results header in a mail they send. What
+        they cannot forge is the receiving server's verdict, which that server PREPENDS, so only the
+        topmost Authentication-Results counts, and only if its authserv-id is `authserv` (Gmail's
+        mx.google.com). It must show a passing DKIM signature for `domain` and DMARC passing with
+        header.from = `domain`. The single From address must also be at `domain`. A mail with more than
+        one From, Date or Subject is ambiguous (RFC 5322 allows one) and refused.
+        """
+        dom = domain.lower()
+        for name in ("from", "date", "subject"):
+            n = sum(1 for k, _ in self.headers if k.lower() == name)
+            if n > 1:
+                return f"ambiguous: {n} {name.title()} headers"
+        froms = [v for k, v in self.headers if k.lower() == "from"]
+        if not froms:
+            return "no From header"
+        addr = parseaddr(froms[0])[1].lower()
+        if addr.rsplit("@", 1)[-1] != dom:
+            return f"From address is not at {domain}"
+        auth = [v for k, v in self.headers if k.lower() == "authentication-results"]
+        if not auth:
+            return "no Authentication-Results"
+        top = auth[0].strip().lower()
+        server = top.split(";", 1)[0].strip()
+        if server != authserv.lower():
+            return f"topmost Authentication-Results is from {server!r}, not {authserv}"
+        signed = re.findall(r"dkim=pass[^;]*?header\.(?:i=@|d=)([a-z0-9.-]+)", top)
+        if dom not in signed:
+            return f"no passing DKIM signature for {domain}"
+        if not re.search(r"dmarc=pass\b[^;]*header\.from=" + re.escape(dom) + r"(?![a-z0-9.-])", top):
+            return f"DMARC did not pass for {domain}"
+        return None
 
     # StatementLens's old _RawStatement names, so existing callers keep working
     @property

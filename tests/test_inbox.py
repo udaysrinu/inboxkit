@@ -159,3 +159,31 @@ def test_headers_keep_order_and_duplicates_so_the_first_auth_result_can_be_trust
     d = _source(svc).fetch(limit=5)[0]
     auth = [v for n, v in d.headers if n == "Authentication-Results"]
     assert auth == ["mx.google.com; dkim=pass", "attacker.example; dkim=pass"], auth
+
+
+GOOD = [("Authentication-Results", "mx.google.com; dkim=pass header.i=@mail.example.com header.s=k1 header.b=x; "
+                                   "spf=pass smtp.mailfrom=a@mail.example.com; dmarc=pass (p=REJECT) header.from=mail.example.com"),
+        ("From", "Example <notes@mail.example.com>"), ("Date", "Fri, 16 Oct 2026 18:04:39 +0000"), ("Subject", "Note")]
+
+
+def _doc(headers):
+    return Document("m", "n.pdf", b"", headers=headers)
+
+
+def test_a_genuinely_signed_mail_is_authenticated():
+    assert _doc(GOOD).authenticated("mail.example.com") is None
+
+
+def test_spoofing_attempts_are_refused():
+    swap = lambda name, value: [(n, value if n == name else v) for n, v in GOOD]
+    cases = {
+        "From at another domain": swap("From", "Example <notes@evil.example>"),
+        "a forged verdict on top": [("Authentication-Results", "evil.example; dkim=pass header.i=@mail.example.com; dmarc=pass header.from=mail.example.com")] + GOOD,
+        "no verdict at all": [h for h in GOOD if h[0] != "Authentication-Results"],
+        "DKIM signed by someone else": swap("Authentication-Results", GOOD[0][1].replace("header.i=@mail.example.com", "header.i=@evil.example")),
+        "DMARC failed": swap("Authentication-Results", GOOD[0][1].replace("dmarc=pass", "dmarc=fail")),
+        "lookalike domain": swap("Authentication-Results", GOOD[0][1].replace("header.from=mail.example.com", "header.from=mail.example.com.evil.example")),
+        "two From headers": GOOD + [("From", "x <notes@mail.example.com>")],
+    }
+    for why, headers in cases.items():
+        assert _doc(headers).authenticated("mail.example.com"), f"accepted: {why}"
