@@ -4,33 +4,11 @@ inboxkit is a Python library, not a service. It runs inside the app that imports
 own machine. It calls Google's Gmail REST API with Google's own client library and a token that only
 that machine holds. No AI, MCP server or third-party service is involved.
 
+The big-picture diagrams are draw.io: each PNG has its editable `.drawio` beside it in `docs/img/`.
+
 ## 1. Where it sits
 
-```mermaid
-flowchart LR
-  subgraph APPS["Apps that import it"]
-    direction TB
-    SL["<b>StatementLens</b><br/>bank + card statements"]
-    NF["<b>Netfolio</b><br/>contract notes · positions"]
-    YA["your app"]
-  end
-  subgraph IK["inboxkit"]
-    direction TB
-    IN["<b>inbox</b><br/>GmailDocuments · Document"]
-    PD["<b>pdf</b><br/>PdfDecryptor · PdfTextExtractor"]
-    PW["<b>passwords</b><br/>candidates · parse_rule · derive"]
-    SE["<b>secrets</b><br/>SecretStore"]
-    PO["<b>positions</b><br/>parse_position"]
-    IN --> SE
-    PD --> PW
-  end
-  APPS --> IN
-  APPS --> PD
-  APPS --> PO
-  APPS --> SE
-  IN -->|"HTTPS, gmail.readonly"| G[("Gmail API")]
-  SE --> KC[("OS keychain<br/>macOS · Windows · Linux")]
-```
+![Where inboxkit sits: StatementLens, Netfolio or your app import it; its inbox, pdf, passwords, secrets and positions modules run inside the app; it reads Gmail read-only and keeps the token in the OS keychain](docs/img/where-it-sits.png)
 
 Each app has its own keychain namespace (`SecretStore("<app>")`), and the query is always the app's:
 only the app knows which senders matter. Two apps can share one Gmail consent: Netfolio passes
@@ -83,23 +61,7 @@ Anyone can write any `From:` line, and any `Authentication-Results:` header too.
 forge is the verdict the receiving server **prepends**. So only the topmost one counts, and only if
 Gmail's own server wrote it.
 
-```mermaid
-flowchart TB
-  S["doc.authenticated(domain)"] --> L{"labels include SENT or DRAFT?"}
-  L -->|"yes"| X["refuse: not received mail"]
-  L -->|"no"| H{"exactly one From, Date and Subject?"}
-  H -->|"no"| X2["refuse: ambiguous headers"]
-  H -->|"yes"| F{"From address inside domain?<br/>dot boundary: evilsbi.co.in is not sbi.co.in"}
-  F -->|"no"| X3["refuse"]
-  F -->|"yes"| A["topmost Authentication-Results<br/><b>_auth_results()</b>: RFC 8601 parse,<br/>comments and quoted strings removed first"]
-  A --> P{"parsed, and authserv-id == mx.google.com?"}
-  P -->|"no"| X4["refuse: malformed, or not Gmail's verdict"]
-  P -->|"yes"| D{"exactly one dmarc entry, result pass,<br/>header.from aligned with From and inside domain?"}
-  D -->|"no"| X5["refuse"]
-  D -->|"yes"| K{"a passing DKIM signature inside domain?<br/>(skipped only with allow_spf_only=True)"}
-  K -->|"no"| X6["refuse: SPF-only senders need the explicit opt-in"]
-  K -->|"yes"| OK["None: proven"]
-```
+![doc.authenticated(domain): received mail, one From/Date/Subject, From inside the domain, then Gmail's topmost verdict, DMARC pass and aligned, DKIM pass inside the domain; any failure returns the reason](docs/img/authenticated.png)
 
 - It returns `None` when the mail is proven, otherwise the reason. Anything it can't parse fails
   closed.
